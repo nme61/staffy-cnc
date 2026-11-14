@@ -23,6 +23,8 @@ Open http://localhost:3100. No machine? Choose **Cut → Practise with a pretend
 | `npm test` | Run the automated tests |
 | `npm run typecheck` | Check the TypeScript |
 | `npm run build` | Build for release into `dist/` |
+| `npm run app` | Run the Windows app (needs [Rust](https://rustup.rs) and the Microsoft C++ build tools) |
+| `npm run app:build` | Build the Windows app and its installer into `src-tauri/target/release/` |
 
 Extra pages:
 - `http://localhost:3100/engine-test.html` loads the 3D engine (OpenCASCADE) and slices a test part.

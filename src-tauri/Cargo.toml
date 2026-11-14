@@ -1,0 +1,21 @@
+[package]
+name = "staffy-cnc"
+version = "0.1.0"
+description = "Design it, make it, cut it. Friendly CNC software for hobby machines."
+authors = ["Warner Media Design"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/nme61/staffy-cnc"
+edition = "2021"
+
+[lib]
+name = "staffy_cnc_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2", features = [] }
+serialport = { version = "4", default-features = false }

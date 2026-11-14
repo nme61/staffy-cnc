@@ -23,7 +23,6 @@ export class WebSerialTransport implements Transport {
   private cb: ((s: string) => void) | null = null;
   private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
   private reader: ReadableStreamDefaultReader<string> | null = null;
-  private enc = new TextEncoder();
   onDisconnect: (() => void) | null = null;
   info: { usbVendorId?: number; usbProductId?: number } = {};
 
@@ -58,7 +57,8 @@ export class WebSerialTransport implements Transport {
   }
 
   onData(cb: (s: string) => void) { this.cb = cb; }
-  async write(data: string) { await this.writer?.write(this.enc.encode(data)); }
+  /** One character is one byte. GRBL's jog-cancel is the single byte 0x85, which UTF-8 would turn into two. */
+  async write(data: string) { await this.writer?.write(Uint8Array.from(data, (c) => c.charCodeAt(0) & 0xff)); }
   async close() {
     try { await this.reader?.cancel(); } catch { /* already closed */ }
     try { this.writer?.releaseLock(); } catch { /* already released */ }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useCutFlow } from './cut/useCutFlow';
 import { useMachine, describeState } from './machine/useMachine';
 import { CutScreen } from './screens/CutScreen';
 import { StartScreen } from './screens/StartScreen';
@@ -23,6 +24,7 @@ function ComingSoon({ step, next, go }: { step: Step; next: Step; go: (s: Step) 
 export default function App() {
   const [step, setStep] = useState<Step>('Start');
   const machine = useMachine();
+  const flow = useCutFlow(machine);
   const d = describeState(machine.status);
 
   return (
@@ -48,7 +50,7 @@ export default function App() {
         {step === 'Start' && <StartScreen go={setStep} />}
         {step === 'Design' && <ComingSoon step="Design" next="Make" go={setStep} />}
         {step === 'Make' && <ComingSoon step="Make" next="Cut" go={setStep} />}
-        {step === 'Cut' && <CutScreen machine={machine} />}
+        {step === 'Cut' && <CutScreen machine={machine} flow={flow} />}
       </main>
       <footer className="px-4 py-4 text-center text-sm text-muted">
         Staffy CNC · free and open source (GPL-3.0) · made by Warner Media Design

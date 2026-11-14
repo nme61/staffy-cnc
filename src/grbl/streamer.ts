@@ -19,6 +19,8 @@ export function prepareGcode(source: string): { lines: string[]; sourceLine: num
       .replace(/;.*$/, '')
       .replace(/\s+/g, '')
       .replace(/%/g, '')
+      // One character must be one byte, or the buffer count goes wrong. G-code is plain ASCII.
+      .replace(/[^\x21-\x7e]/g, '')
       .toUpperCase();
     if (clean) { lines.push(clean); sourceLine.push(i + 1); }
   });

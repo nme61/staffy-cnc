@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cubiko Check</title>
+<!-- Staffy CNC — Cubiko check. GPL-3.0-or-later. Reads what the machine reports; only moves it if you press "Home". -->
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #ffffff; --ink: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7;
+    --blue: #0071e3; --green: #1f9d55; --amber: #b25e00; --red: #d70015; --soft: #eef4ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #000; --card: #1c1c1e; --ink: #f5f5f7; --muted: #a1a1a6; --line: #38383a;
+      --blue: #0a84ff; --green: #30d158; --amber: #ff9f0a; --red: #ff453a; --soft: #0a2540;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 32px; margin: 8px 0 4px; letter-spacing: -0.02em; }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    padding: 20px; margin: 0 0 14px; opacity: .45; transition: opacity .2s; }
+  .step.active, .step.done { opacity: 1; }
+  .step.active { border-color: var(--blue); box-shadow: 0 0 0 3px var(--soft); }
+  .step h2 { font-size: 20px; margin: 0 0 6px; display: flex; gap: 10px; align-items: center; }
+  .num { width: 30px; height: 30px; border-radius: 50%; background: var(--line); color: var(--ink);
+    display: inline-grid; place-items: center; font-size: 15px; flex: none; }
+  .active .num { background: var(--blue); color: #fff; }
+  .done .num { background: var(--green); color: #fff; }
+  .step p { margin: 6px 0; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 12px; padding: 12px 20px;
+    background: var(--blue); color: #fff; cursor: pointer; margin: 8px 8px 0 0; min-height: 48px; }
+  button.secondary { background: var(--line); color: var(--ink); }
+  button.danger { background: var(--red); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .msg { margin-top: 10px; padding: 10px 14px; border-radius: 10px; background: var(--soft); }
+  .msg.ok { background: color-mix(in srgb, var(--green) 15%, transparent); }
+  .msg.warn { background: color-mix(in srgb, var(--amber) 18%, transparent); }
+  .msg.bad { background: color-mix(in srgb, var(--red) 15%, transparent); }
+  .msg:empty { display: none; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 15px; }
+  td { padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:first-child { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+  .tag { font-size: 13px; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+  .tag.ok { background: color-mix(in srgb, var(--green) 18%, transparent); }
+  .tag.diff { background: color-mix(in srgb, var(--amber) 22%, transparent); }
+  .lights { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 12px; }
+  .light { border: 1px solid var(--line); border-radius: 14px; padding: 12px; text-align: center; }
+  .dot { width: 26px; height: 26px; border-radius: 50%; background: var(--line); margin: 0 auto 6px; }
+  .light.on .dot { background: var(--amber); }
+  .light.seen .dot { background: var(--green); }
+  .light small { color: var(--muted); display: block; }
+  label.check { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0; }
+  label.check input { width: 22px; height: 22px; margin-top: 2px; flex: none; }
+  details { margin-top: 18px; }
+  summary { cursor: pointer; color: var(--muted); }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+    font-size: 13px; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+  #stopbar { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 16px; display: none;
+    background: var(--card); border-top: 1px solid var(--line); text-align: center; }
+  #stopbar button { width: min(400px, 100%); margin: 0; }
+  .muted { color: var(--muted); font-size: 15px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Cubiko check</h1>
+  <p class="lead">This page asks your Cubiko what it is and how it's set up, then saves a report for Staffy CNC.
+    It reads only. The machine moves only if you choose step 6.</p>
+
+  <div id="unsupported" class="msg bad" style="display:none">
+    This browser can't talk to USB machines. Open this page in <b>Google Chrome</b> or <b>Microsoft Edge</b>.
+  </div>
+
+  <section class="step active" id="s1">
+    <h2><span class="num">1</span> Connect the machine</h2>
+    <p>Plug the Cubiko into this computer with its USB cable and switch it on. Then press <b>Connect</b>
+      and choose the entry that says <b>USB-SERIAL CH340</b> (or similar) from the list.</p>
+    <button id="btnConnect">Connect</button>
+    <button id="btnPractice" class="secondary">Practice without a machine</button>
+    <div class="msg" id="m1"></div>
+  </section>
+
+  <section class="step" id="s2">
+    <h2><span class="num">2</span> Ask the machine about itself</h2>
+    <p>Staffy will ask for the firmware version, every setting, and the current position. Takes a few seconds.</p>
+    <button id="btnRead" disabled>Read machine info</button>
+    <div class="msg" id="m2"></div>
+    <div id="summary"></div>
+  </section>
+
+  <section class="step" id="s3">
+    <h2><span class="num">3</span> Check the buffer size</h2>
+    <p>Staffy needs to know how much the machine can hold in memory while cutting.
+      This briefly changes one report setting (<code>$10</code>) and puts it back straight away. Nothing moves.</p>
+    <button id="btnBuffer" disabled>Check buffer</button>
+    <button id="btnSkipBuffer" class="secondary" disabled>Skip</button>
+    <div class="msg" id="m3"></div>
+  </section>
+
+  <section class="step" id="s4">
+    <h2><span class="num">4</span> Test the switches by hand</h2>
+    <p>Press <b>Start</b>, then gently press each limit switch with your finger, and touch the probe clip to the
+      probe plate. Each light turns green when the machine notices. Nothing moves.</p>
+    <button id="btnPins" disabled>Start</button>
+    <button id="btnPinsDone" class="secondary" disabled>I'm done</button>
+    <div class="lights" id="lights"></div>
+    <div class="msg" id="m4"></div>
+  </section>
+
+  <section class="step" id="s5">
+    <h2><span class="num">5</span> Save the report</h2>
+    <p>Save the file and send it to Claude (drag it into the chat). That's the test done.</p>
+    <button id="btnSave" disabled>Save report</button>
+    <button id="btnCopy" class="secondary" disabled>Copy as text</button>
+    <div class="msg" id="m5"></div>
+  </section>
+
+  <section class="step" id="s6">
+    <h2><span class="num">6</span> Optional: test homing</h2>
+    <p>Homing makes the machine <b>move</b> until it finds its switches. Only do this if you're comfortable.</p>
+    <label class="check"><input type="checkbox" class="hc"> Nothing is on the bed and the bit is not touching anything.</label>
+    <label class="check"><input type="checkbox" class="hc"> The spindle is off and the laser is not fitted (or is off).</label>
+    <label class="check"><input type="checkbox" class="hc"> I know the big red <b>Stop</b> button at the bottom of the screen stops it.</label>
+    <button id="btnHome" disabled>Home the machine</button>
+    <div class="msg" id="m6"></div>
+  </section>
+
+  <details>
+    <summary>Show what the machine said</summary>
+    <pre id="log"></pre>
+  </details>
+</main>
+
+<div id="stopbar"><button class="danger" id="btnStop">STOP</button></div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const enc = new TextEncoder();
+
+  // ---------- Report ----------
+  const report = {
+    tool: 'staffy-cnc cubiko-check 1', date: new Date().toISOString(), browser: navigator.userAgent,
+    practice: false, usb: null, banner: [], alarmsAtStart: [], buildInfo: [], settings: {},
+    statusFirst: null, offsets: [], parserState: null, buffer: null, pins: {}, homing: null,
+    errors: [], log: [],
+  };
+
+  // ---------- Log ----------
+  const t0 = performance.now();
+  function log(dir, text) {
+    const line = `${((performance.now() - t0) / 1000).toFixed(2).padStart(7)} ${dir} ${text}`;
+    report.log.push(line);
+    if (report.log.length > 4000) report.log.shift();
+    const el = $('log');
+    el.textContent += line + '\n';
+    el.scrollTop = el.scrollHeight;
+  }
+  function msg(n, text, kind = '') { const el = $('m' + n); el.className = 'msg ' + kind; el.innerHTML = text; }
+
+  // ---------- Steps ----------
+  function activate(n) {
+    for (let i = 1; i <= 6; i++) {
+      const s = $('s' + i);
+      if (i < n && !s.classList.contains('skipped')) s.classList.add('done');
+      s.classList.toggle('active', i === n);
+    }
+    $('s' + n).scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  // ---------- Transport (real serial or practice machine) ----------
+  let transport = null;      // { write(str), close() }
+  let lineBuf = '';
+  let collector = null;      // { lines, resolve, timer }
+  let statusWaiter = null;
+  let lastStatus = null;
+  const seenBanner = [];
+
+  function onText(chunk) {
+    lineBuf += chunk;
+    let i;
+    while ((i = lineBuf.indexOf('\n')) >= 0) {
+      const line = lineBuf.slice(0, i).replace(/\r$/, '').trim();
+      lineBuf = lineBuf.slice(i + 1);
+      if (line) onLine(line);
+    }
+  }
+
+  function onLine(line) {
+    log('<-', line);
+    if (line.startsWith('<')) {
+      lastStatus = parseStatus(line);
+      if (statusWaiter) { const w = statusWaiter; statusWaiter = null; w(lastStatus); }
+      return;
+    }
+    if (/^Grbl|^\[MSG|^ALARM/i.test(line) && !collector) seenBanner.push(line);
+    if (/^ALARM/i.test(line)) report.errors.push(line);
+    if (collector) {
+      collector.lines.push(line);
+      if (line === 'ok' || /^error/i.test(line) || /^ALARM/i.test(line)) {
+        const c = collector; collector = null; clearTimeout(c.timer); c.resolve(c.lines);
+      }
+    }
+  }
+
+  function parseStatus(line) {
+    const body = line.replace(/^</, '').replace(/>$/, '');
+    const parts = body.split('|');
+    const st = { raw: line, state: parts[0] };
+    for (const p of parts.slice(1)) {
+      const k = p.indexOf(':');
+      if (k > 0) st[p.slice(0, k)] = p.slice(k + 1);
+    }
+    return st;
+  }
+
+  async function write(str) { log('->', JSON.stringify(str).slice(1, -1)); await transport.write(str); }
+
+  function command(cmd, timeoutMs = 4000) {
+    return new Promise(async (resolve) => {
+      if (collector) { clearTimeout(collector.timer); collector.resolve(collector.lines); }
+      collector = { lines: [], resolve, timer: setTimeout(() => {
+        const c = collector; collector = null;
+        if (c) { c.lines.push('(no reply)'); resolve(c.lines); }
+      }, timeoutMs) };
+      await write(cmd + '\n');
+    });
+  }
+
+  function askStatus(timeoutMs = 1500) {
+    return new Promise(async (resolve) => {
+      const timer = setTimeout(() => { statusWaiter = null; resolve(null); }, timeoutMs);
+      statusWaiter = (s) => { clearTimeout(timer); resolve(s); };
+      await write('?');
+    });
+  }
+
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  async function openSerial() {
+    const port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    const info = port.getInfo ? port.getInfo() : {};
+    report.usb = { vendorId: info.usbVendorId ?? null, productId: info.usbProductId ?? null,
+      vendorHex: info.usbVendorId != null ? '0x' + info.usbVendorId.toString(16).padStart(4, '0') : null,
+      productHex: info.usbProductId != null ? '0x' + info.usbProductId.toString(16).padStart(4, '0') : null };
+    const writer = port.writable.getWriter();
+    const reader = port.readable.pipeThrough(new TextDecoderStream()).getReader();
+    (async () => {
+      try {
+        for (;;) { const { value, done } = await reader.read(); if (done) break; if (value) onText(value); }
+      } catch (e) {
+        log('!!', 'Connection lost: ' + e.message);
+        msg(1, 'The connection was lost. Check the cable, then reload this page and connect again.', 'bad');
+      }
+    })();
+    navigator.serial.addEventListener('disconnect', () => {
+      log('!!', 'USB unplugged');
+      msg(1, 'The machine was unplugged. Plug it back in, reload this page and connect again.', 'bad');
+    });
+    return { write: (s) => writer.write(enc.encode(s)) };
+  }
+
+  // A tiny pretend Cubiko so the page can be tried (and tested) without hardware.
+  function openPractice() {
+    report.practice = true;
+    const settings = { 0:10,1:25,2:0,3:5,4:0,5:0,6:0,10:1,11:0.010,12:0.002,13:0,20:0,21:1,22:1,23:3,24:100,
+      25:1000,26:250,27:2,30:10000,31:0,32:0,100:800,101:800,102:800,110:2000,111:2000,112:600,120:100,
+      121:100,122:100,130:150,131:110,132:40 };
+    let pins = '', state = 'Alarm', hold = false;
+    const emit = (s) => setTimeout(() => onText(s), 15);
+    const statusLine = () => {
+      let s = `<${state}|MPos:0.000,0.000,0.000|FS:0,0`;
+      if (settings[10] & 2) s += '|Bf:15,127';
+      if (pins) s += '|Pn:' + pins;
+      return s + '>\r\n';
+    };
+    window.practicePins = (p) => { pins = p; };
+    emit('\r\nGrbl 1.1h [\'$\' for help]\r\n[MSG:\'$H\'|\'$X\' to unlock]\r\nALARM:1\r\n');
+    let lb = '';
+    return { write(s) {
+      for (const ch of s) {
+        if (ch === '?') { emit(statusLine()); continue; }
+        if (ch === '!') { hold = true; state = 'Hold:0'; continue; }
+        if (ch === '\x18') { hold = false; state = 'Alarm'; emit('\r\nGrbl 1.1h [\'$\' for help]\r\nALARM:3\r\n'); continue; }
+        if (ch !== '\n') { lb += ch; continue; }
+        const c = lb.trim(); lb = '';
+        if (c === '$I') emit('[VER:1.1h.20190825:Practice]\r\n[OPT:VNMZL,15,128]\r\nok\r\n');
+        else if (c === '$$') emit(Object.entries(settings).map(([k, v]) => `$${k}=${v}`).join('\r\n') + '\r\nok\r\n');
+        else if (c === '$#') emit('[G54:0.000,0.000,0.000]\r\n[G55:0.000,0.000,0.000]\r\n[G28:0.000,0.000,0.000]\r\n[G30:0.000,0.000,0.000]\r\n[G92:0.000,0.000,0.000]\r\n[TLO:0.000]\r\n[PRB:0.000,0.000,0.000:0]\r\nok\r\n');
+        else if (c === '$G') emit('[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]\r\nok\r\n');
+        else if (c === '$X') { state = 'Idle'; emit('[MSG:Caution: Unlocked]\r\nok\r\n'); }
+        else if (c === '$H') { state = 'Home'; setTimeout(() => { if (!hold) { state = 'Idle'; emit('ok\r\n'); } }, 2500); }
+        else if (/^\$\d+=/.test(c)) { const [k, v] = c.slice(1).split('='); settings[k] = Number(v); emit('ok\r\n'); }
+        else emit('ok\r\n');
+      }
+    } };
+  }
+
+  // ---------- Step 1: connect ----------
+  async function afterConnect() {
+    $('btnConnect').disabled = true; $('btnPractice').disabled = true;
+    msg(1, 'Listening for the machine…');
+    await wait(2000);
+    if (!seenBanner.some((l) => /^Grbl/i.test(l))) {
+      log('..', 'No welcome message yet, sending a soft reset (does not move the machine)');
+      await write('\x18');
+      await wait(2000);
+    }
+    report.banner = seenBanner.slice();
+    report.alarmsAtStart = seenBanner.filter((l) => /^ALARM/i.test(l));
+    const hello = seenBanner.find((l) => /^Grbl/i.test(l));
+    if (!hello) {
+      const s = await askStatus();
+      if (!s) {
+        msg(1, `Connected, but the machine isn't answering. Check it's switched on, then reload and try again.
+          If it still says nothing, the speed may be wrong (Staffy uses 115200).`, 'bad');
+        return;
+      }
+    }
+    msg(1, `Connected${hello ? ': <b>' + esc(hello) + '</b>' : ''}.` +
+      (report.alarmsAtStart.length ? ' It started in alarm mode, which is normal for the Cubiko (it hasn\'t found its switches yet). That\'s fine for this test.' : ''), 'ok');
+    $('btnRead').disabled = false;
+    activate(2);
+  }
+
+  $('btnConnect').onclick = async () => {
+    try { transport = await openSerial(); }
+    catch (e) {
+      if (e.name === 'NotFoundError') msg(1, 'No machine was chosen. Press Connect again and pick the USB entry.', 'warn');
+      else msg(1, `Couldn't open the machine: ${esc(e.message)}. Close any other CNC program (Candle, UGS, LightBurn) and try again.`, 'bad');
+      return;
+    }
+    afterConnect();
+  };
+  $('btnPractice').onclick = () => { transport = openPractice(); afterConnect(); };
+
+  // ---------- Step 2: read info ----------
+  const NAMES = {
+    10: 'What the status report includes', 13: 'Report in inches', 20: 'Software limits', 21: 'Hard limits (switches stop the machine)',
+    22: 'Homing enabled', 23: 'Homing direction', 27: 'Homing pull-off (mm)', 30: 'Max spindle / laser power', 31: 'Min spindle / laser power',
+    32: 'Laser mode', 100: 'X steps per mm', 101: 'Y steps per mm', 102: 'Z steps per mm', 110: 'X max speed (mm/min)',
+    111: 'Y max speed (mm/min)', 112: 'Z max speed (mm/min)', 120: 'X acceleration', 121: 'Y acceleration', 122: 'Z acceleration',
+    130: 'X travel (mm)', 131: 'Y travel (mm)', 132: 'Z travel (mm)',
+  };
+  const EXPECT = { 30: 10000, 100: 800, 101: 800, 102: 800 };   // from the SainSmart Cubiko docs
+
+  $('btnRead').onclick = async () => {
+    $('btnRead').disabled = true;
+    msg(2, 'Asking…');
+    report.buildInfo = (await command('$I')).filter((l) => l !== 'ok');
+    const set = await command('$$', 6000);
+    for (const l of set) { const m = /^\$(\d+)=(.+)$/.exec(l); if (m) report.settings[m[1]] = m[2].trim(); }
+    report.offsets = (await command('$#')).filter((l) => l !== 'ok');
+    report.parserState = (await command('$G')).find((l) => l.startsWith('[GC')) || null;
+    report.statusFirst = await askStatus();
+
+    const n = Object.keys(report.settings).length;
+    if (!n) { msg(2, 'The machine didn\'t send its settings. Press the button to try again.', 'warn'); $('btnRead').disabled = false; return; }
+    const ver = report.buildInfo.find((l) => l.startsWith('[VER')) || '(no version line)';
+    let rows = '';
+    for (const k of Object.keys(NAMES)) {
+      if (!(k in report.settings)) continue;
+      const v = report.settings[k];
+      let tag = '';
+      if (k in EXPECT) tag = Number(v) === EXPECT[k] ? '<span class="tag ok">matches docs</span>' : `<span class="tag diff">docs say ${EXPECT[k]}</span>`;
+      rows += `<tr><td>$${k}</td><td>${NAMES[k]}</td><td><b>${esc(v)}</b> ${tag}</td></tr>`;
+    }
+    $('summary').innerHTML = `<p class="muted">Firmware: <b>${esc(ver)}</b> · ${n} settings read</p><table>${rows}</table>`;
+    msg(2, 'Got it.', 'ok');
+    const hasBf = report.statusFirst && report.statusFirst.Bf;
+    if (hasBf) {
+      report.buffer = { bf: report.statusFirst.Bf, method: 'already reported' };
+      msg(3, `The machine already reports its buffer: <b>${esc(hasBf)}</b>. Nothing to do here.`, 'ok');
+      $('s3').classList.add('done');
+      startPinStep();
+    } else {
+      $('btnBuffer').disabled = false; $('btnSkipBuffer').disabled = false;
+      activate(3);
+    }
+  };
+
+  // ---------- Step 3: buffer ----------
+  $('btnBuffer').onclick = async () => {
+    $('btnBuffer').disabled = true; $('btnSkipBuffer').disabled = true;
+    const orig = Number(report.settings[10] ?? 1);
+    const withBf = orig | 2;
+    msg(3, 'Checking…');
+    const r1 = await command('$10=' + withBf);
+    let s = null;
+    if (r1.includes('ok')) { await wait(150); s = await askStatus(); }
+    const r2 = await command('$10=' + orig);
+    const restored = r2.includes('ok');
+    report.buffer = { bf: s && s.Bf ? s.Bf : null, method: '$10 temporarily ' + orig + '→' + withBf, restored, replies: [r1, r2] };
+    if (!restored) msg(3, `Couldn't put <code>$10</code> back to ${orig}. Please tell Claude; it's harmless but should be reset.`, 'warn');
+    else if (s && s.Bf) msg(3, `Buffer: <b>${esc(s.Bf)}</b> (free blocks, free bytes). <code>$10</code> is back to ${orig}.`, 'ok');
+    else msg(3, `The machine didn't report a buffer size. That's useful to know too. <code>$10</code> is back to ${orig}.`, 'warn');
+    startPinStep();
+  };
+  $('btnSkipBuffer').onclick = () => { $('s3').classList.add('skipped'); report.buffer = { skipped: true }; startPinStep(); };
+
+  // ---------- Step 4: pins ----------
+  const PINS = [['X', 'X limit switch'], ['Y', 'Y limit switch'], ['Z', 'Z limit switch'], ['P', 'Probe plate']];
+  let polling = null;
+  function startPinStep() {
+    $('lights').innerHTML = PINS.map(([k, label]) =>
+      `<div class="light" id="pin${k}"><div class="dot"></div>${label}<small>waiting</small></div>`).join('');
+    $('btnPins').disabled = false;
+    activate(4);
+  }
+  $('btnPins').onclick = () => {
+    $('btnPins').disabled = true; $('btnPinsDone').disabled = false;
+    msg(4, 'Watching… press each switch now.');
+    report.pins = { idle: lastStatus && lastStatus.Pn ? lastStatus.Pn : '', seen: {} };
+    polling = setInterval(async () => {
+      const s = await askStatus(800);
+      const pn = (s && s.Pn) || '';
+      for (const [k] of PINS) {
+        const el = $('pin' + k);
+        const on = pn.includes(k);
+        el.classList.toggle('on', on);
+        if (on && !report.pins.seen[k]) {
+          report.pins.seen[k] = true;
+          el.classList.add('seen');
+          el.querySelector('small').textContent = 'working';
+        }
+      }
+      if (PINS.every(([k]) => report.pins.seen[k])) finishPins();
+    }, 250);
+  };
+  function finishPins() {
+    clearInterval(polling); polling = null;
+    $('btnPinsDone').disabled = true;
+    const missing = PINS.filter(([k]) => !report.pins.seen[k]).map(([, l]) => l);
+    report.pins.notSeen = missing;
+    msg(4, missing.length ? `Not seen: <b>${missing.join(', ')}</b>. That's recorded; it may mean the switch isn't wired, or wasn't pressed.`
+      : 'All four switches work.', missing.length ? 'warn' : 'ok');
+    $('btnSave').disabled = false; $('btnCopy').disabled = false;
+    $('s4').classList.add('done');
+    activate(5);
+    updateHomeButton();
+  }
+  $('btnPinsDone').onclick = finishPins;
+
+  // ---------- Step 5: save ----------
+  function reportText() { return JSON.stringify(report, null, 2); }
+  $('btnSave').onclick = () => {
+    const blob = new Blob([reportText()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `cubiko-report-${new Date().toISOString().slice(0, 10)}${report.practice ? '-practice' : ''}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    msg(5, `Saved <b>${a.download}</b> to your Downloads folder. Drag it into the Claude chat.`, 'ok');
+    $('s5').classList.add('done');
+    $('s6').classList.add('active');
+  };
+  $('btnCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(reportText()); msg(5, 'Copied. Paste it into the Claude chat.', 'ok'); }
+    catch { msg(5, 'Couldn\'t copy. Use Save report instead.', 'warn'); }
+  };
+
+  // ---------- Step 6: homing ----------
+  const checks = [...document.querySelectorAll('.hc')];
+  function updateHomeButton() {
+    const ready = !$('btnSave').disabled && checks.every((c) => c.checked);
+    $('btnHome').disabled = !ready;
+  }
+  checks.forEach((c) => c.addEventListener('change', updateHomeButton));
+  $('btnHome').onclick = async () => {
+    $('btnHome').disabled = true;
+    if (String(report.settings[22]) === '0') {
+      msg(6, 'Homing is switched off on this machine (<code>$22=0</code>). Staffy will note that; nothing to test.', 'warn');
+      report.homing = { enabled: false };
+      return;
+    }
+    $('stopbar').style.display = 'block';
+    msg(6, 'Homing… watch which corner it heads to.');
+    const t = performance.now();
+    const r = await command('$H', 60000);
+    $('stopbar').style.display = 'none';
+    const s = await askStatus();
+    report.homing = { replies: r, seconds: +((performance.now() - t) / 1000).toFixed(1), statusAfter: s };
+    if (r.includes('ok')) msg(6, `Homed in ${report.homing.seconds} s. Which corner did it go to (e.g. back-right, top)? Tell Claude, then press <b>Save report</b> again.`, 'ok');
+    else msg(6, `Homing didn't finish: <b>${esc(r.join(' '))}</b>. That's recorded. Press <b>Save report</b> again.`, 'warn');
+  };
+
+  // ---------- Stop ----------
+  $('btnStop').onclick = async () => {
+    await write('!');
+    await wait(300);
+    await write('\x18');
+    report.errors.push('User pressed STOP');
+    $('stopbar').style.display = 'none';
+    msg(6, 'Stopped. The machine is in alarm mode now; that\'s expected after a stop.', 'warn');
+  };
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  if (!('serial' in navigator)) {
+    if (!window.isSecureContext) $('unsupported').innerHTML =
+      'Chrome only allows USB from a safe address. Open this page as <b>http://localhost:3000/staffy-cnc/tools/cubiko-check.html</b> (see the steps Claude gave you). "Practice" still works here.';
+    $('unsupported').style.display = 'block';
+    $('btnConnect').disabled = true;
+  }
+})();
+</script>
+</body>
+</html>

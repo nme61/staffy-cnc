@@ -1,0 +1,10 @@
+{
+  "name": "Staffy CNC",
+  "short_name": "Staffy CNC",
+  "description": "Design it, make it, cut it. Friendly CNC software for hobby machines.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f5f7",
+  "theme_color": "#0071e3",
+  "icons": [{ "src": "/staffy.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
